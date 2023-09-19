@@ -1,0 +1,3 @@
+filetype
+opencv-contrib-python
+chardet
