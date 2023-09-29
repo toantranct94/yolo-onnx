@@ -11,7 +11,7 @@ python test.py --source test_video/test.mov --conf 0.6 --device cpu
 ```bash
 python test.py --model_detection models/plate_lite.pt --model_recognition models/character_lite.pt
 ```
-## Deloy with TorchServe
+## Serving PyTorch models with TorchServe
 #### Install TorchServe dependencies
 ```bash
 git clone https://github.com/pytorch/serve
