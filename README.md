@@ -35,7 +35,7 @@ cd ..
 mkdir serve_model_store
 
 torch-model-archiver -f --model-name plate --version 1.0 --serialized-file models/plate_lite.pt --handler serve_handler/plate_handler.py  --export-path serve_model_store
-torch-model-archiver -f --model-name character --version 1.0 --serialized-file models/character_lite.pt --handler serve_handler/character_handler.py  --export-path serve_model_store
+torch-model-archiver -f --model-name character --version 1.0 --serialized-file models/character_lite_320.pt --handler serve_handler/character_handler.py  --export-path serve_model_store
 ```
 #### Start TorchServe and register the model with config file
 ```bash
