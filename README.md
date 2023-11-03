@@ -164,3 +164,8 @@ python request.py --client-batching --batch_size 10
 python request.py --client-batching --batch_size --input 0
 ```
 
+## Demo app with PyQT and ByteTrack
+```bash
+python app.py
+```
+
