@@ -1,4 +1,4 @@
-git+https://github.com/ultralytics/ultralytics.git@main
+ultralytics
 filetype
 opencv-contrib-python
 chardet

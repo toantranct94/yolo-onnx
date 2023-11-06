@@ -1,17 +1,20 @@
-import sys
-from PyQt6.QtCore import QDir, Qt
-from PyQt6.QtWidgets import QMainWindow, QLabel, QPushButton, QComboBox, QFileDialog, QApplication, QVBoxLayout, \
-    QHBoxLayout, QWidget, QFrame
-from PyQt6.QtGui import QPixmap, QImage
 import base64
 import json
+import sys
 import time
-from collections import deque, UserList, UserDict
-from concurrent.futures import as_completed
+from collections import deque
+# from concurrent.futures import as_completed
 from threading import Thread
+
 import cv2
 import requests
-from requests_futures.sessions import FuturesSession
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame,
+                             QHBoxLayout, QLabel, QMainWindow, QPushButton,
+                             QVBoxLayout, QWidget)
+
+# from requests_futures.sessions import FuturesSession
 
 global exit_flag
 global batch_size
@@ -257,7 +260,7 @@ def batch_and_send_frames():
     payload, futures = {}, []
     start_time = time.time()
     fps = 0
-    session = FuturesSession()
+    # session = FuturesSession()
 
     while not exit_flag:
         # Batch the frames into a dict payload
