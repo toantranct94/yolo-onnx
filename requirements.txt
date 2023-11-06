@@ -3,3 +3,6 @@ filetype
 opencv-contrib-python
 chardet
 requests-future
+PyQt6
+numpy==1.22.4
+bytetracker

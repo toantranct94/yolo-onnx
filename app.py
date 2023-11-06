@@ -1,20 +1,20 @@
+import sys
+
+import numpy as np
+from PyQt6.QtCore import QDir, Qt
+from PyQt6.QtWidgets import QMainWindow, QLabel, QPushButton, QComboBox, QFileDialog, QApplication, QVBoxLayout, \
+    QHBoxLayout, QWidget, QFrame, QSizePolicy, QSplitter
+from PyQt6.QtGui import QPixmap, QImage
 import base64
 import json
-import sys
 import time
-from collections import deque
-# from concurrent.futures import as_completed
+from collections import deque, UserList, UserDict, defaultdict
+from concurrent.futures import as_completed
 from threading import Thread
-
 import cv2
 import requests
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame,
-                             QHBoxLayout, QLabel, QMainWindow, QPushButton,
-                             QVBoxLayout, QWidget)
-
-# from requests_futures.sessions import FuturesSession
+from requests_futures.sessions import FuturesSession
+from ByteTrack.yolox.tracker.byte_tracker import BYTETracker
 
 global exit_flag
 global batch_size
@@ -24,6 +24,62 @@ global queue_threshold
 global thread1, thread2, thread3
 
 
+class DataStructure:
+    def __init__(self, max_history=10):
+        self.data = defaultdict(list)
+        self.max_history = max_history
+
+    def add(self, plate_id, license_plate):
+        """
+        Add a new license plate to the history of a given plate ID.
+
+        Parameters:
+            plate_id (str): The ID of the license plate.
+            license_plate (str): The license plate to be added.
+
+        Returns:
+            None
+        """
+        string_history = self.data[plate_id]
+        string_history.append(license_plate)
+
+        if len(string_history) > self.max_history:
+            string_history.pop(0)
+
+    def get_most_frequent_license_plate(self, plate_id):
+        """
+        Returns the most frequent license plate for a given plate ID.
+
+        Parameters:
+            plate_id (str): The ID of the license plate.
+
+        Returns:
+            str: The most frequent license plate for the given plate ID. If no recent plates exist
+                 for the given plate ID, returns "unknown".
+        """
+        if plate_id in self.data:
+            recent_plates = self.data[plate_id][-self.max_history:]
+            if recent_plates:
+                plate_counts = defaultdict(int)
+                for string in recent_plates:
+                    plate_counts[string] += 1
+                most_recent_plate = max(plate_counts, key=plate_counts.get)
+                return most_recent_plate
+        return "unknown"
+
+
+class ByteTrackArgument:
+    track_thresh = 0.5  # High_threshold
+    track_buffer = 50  # Number of frame lost tracklets are kept
+    match_thresh = 0.8  # Matching threshold for first stage linear assignment
+    aspect_ratio_thresh = 10.0  # Minimum bounding box aspect ratio
+    min_box_area = 1.0  # Minimum bounding box area
+    mot20 = False  # If used, bounding boxes are not clipped.
+
+
+MIN_THRESHOLD = 0.001
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -31,9 +87,12 @@ class MainWindow(QMainWindow):
         self.input_image = None
         self.worker_thread = []
 
+        self.setMinimumSize(1280, 720)
+
         # Tạo label để hiển thị đầu vào và đặt kích thước cố định cho label
         self.label_input = QLabel()
-        self.label_input.setFixedSize(640, 480)
+        # self.label_input.setSizePolicy(640, 480)
+        self.label_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.label_input.setFrameShape(QFrame.Shape.Box)  # Đặt kiểu viền cho label đầu vào
         self.label_input.setFrameShadow(QFrame.Shadow.Sunken)  # Đặt hiệu ứng bóng nổi cho label đầu vào
         self.label_input.setLineWidth(2)  # Đặt độ rộng của viền cho label đầu vào
@@ -41,7 +100,7 @@ class MainWindow(QMainWindow):
 
         # Tạo label để hiển thị đầu ra và đặt kích thước cố định cho label
         self.label_output = QLabel()
-        self.label_output.setFixedSize(640, 480)
+        # self.label_output.setFixedSize(640, 480)
         self.label_output.setFrameShape(QFrame.Shape.Box)  # Đặt kiểu viền cho label đầu ra
         self.label_output.setFrameShadow(QFrame.Shadow.Sunken)  # Đặt hiệu ứng bóng nổi cho label đầu ra
         self.label_output.setLineWidth(2)  # Đặt độ rộng của viền cho label đầu ra
@@ -82,9 +141,12 @@ class MainWindow(QMainWindow):
         output_frame = QFrame()
         output_frame.setLayout(output_layout)
 
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.addWidget(input_frame)
+        self.splitter.addWidget(output_frame)
+
         main_layout = QHBoxLayout()
-        main_layout.addWidget(input_frame)
-        main_layout.addWidget(output_frame)
+        main_layout.addWidget(self.splitter)
 
         central_widget = QWidget()
         central_widget.setLayout(main_layout)
@@ -139,13 +201,16 @@ class MainWindow(QMainWindow):
 
     def on_stop_detect(self):
         global thread1, thread2, thread3
-        self.button_detect.setEnabled(True)
         self.button_stop.setEnabled(False)
         global exit_flag
         exit_flag = True
+        queue_frame.clear()
+        queue_response.clear()
         thread1.join()
         thread2.join()
         thread3.join()
+        self.button_detect.setEnabled(True)
+        exit_flag = False
 
     def set_input_image(self, cv2_image):
         image = cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB)
@@ -198,11 +263,22 @@ def read_frames():
         print("Error opening video stream or file")
 
     frame_cnt = 0
-    default_fps = cap.get(cv2.CAP_PROP_FPS)
+    # default_fps = cap.get(cv2.CAP_PROP_FPS)
+    default_fps = 30.0
     queue_threshold = 0.5 * default_fps
+    delay_time = 0
+    last_frame_time = time.time()
 
     # Read until video is completed
     while cap.isOpened() and not exit_flag:
+        # Calculate the delay time to maintain the target fps
+        delay_time = (1.0 / default_fps) - (time.time() - last_frame_time)
+        if delay_time > 0:
+            time.sleep(delay_time)
+
+        # Update the last frame time
+        last_frame_time = time.time()
+
         # Capture frame-by-frame
         ret, frame = cap.read()
         if ret:
@@ -245,11 +321,11 @@ def calculate_fps(start_time, snd_cnt):
 
     fps = 1.0 * batch_size / (end_time - start_time)
 
-    print(
-        "With Batch Size {}, FPS at frame number {} is {:.1f}".format(
-            batch_size, snd_cnt, fps
-        )
-    )
+    # print(
+    #     "With Batch Size {}, FPS at frame number {} is {:.1f}".format(
+    #         batch_size, snd_cnt, fps
+    #     )
+    # )
     return fps
 
 
@@ -260,7 +336,7 @@ def batch_and_send_frames():
     payload, futures = {}, []
     start_time = time.time()
     fps = 0
-    # session = FuturesSession()
+    session = FuturesSession()
 
     while not exit_flag:
         # Batch the frames into a dict payload
@@ -299,22 +375,47 @@ def batch_and_send_frames():
 
     # Send any remaining frames
     # _, snd_cnt = send_frames(payload, snd_cnt)
-    print(
-        "With Batch Size {}, FPS at frame number {} is {:.1f}".format(
-            batch_size, snd_cnt, fps
-        )
-    )
+    # print(
+    #     "With Batch Size {}, FPS at frame number {} is {:.1f}".format(
+    #         batch_size, snd_cnt, fps
+    #     )
+    # )
 
 
 def show_frames():
+    # Initialize variables
+    tracker = BYTETracker(ByteTrackArgument)
+    data_struct = DataStructure()
+
     while True:
         if queue_response:
             frame, data = queue_response.popleft()
+            height, width = frame.shape[:2]
+            dets = []
+            license_plate_list = []
             show_fps = (len(queue_response) / queue_threshold) * default_fps
-            print("queue_frame: {}, queue_response: {}, show_fps: {}".format(len(queue_frame), len(queue_response),
-                                                                             show_fps))
+            show_string = "FPS: {} queue_frame: {}, queue_response: {}".format(show_fps, len(queue_frame),
+                                                                               len(queue_response))
+
+            # print(show_string)
+
             window.set_input_image(frame)
+
+            cv2.putText(frame, show_string, (0, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 225), 3)
+
             if data["num_plate"] > 0:
+
+                # Tracking
+                for pos in range(data["num_plate"]):
+                    boxes = data["boxes"][pos]
+                    score = data["score"][pos]
+
+                    det = boxes
+                    det.append(score)
+                    dets.append(det)
+                online_targets = tracker.update(np.array(dets), [height, width], [height, width])
+                print(online_targets)
+
                 for pos in range(data["num_plate"]):
                     boxes = data["boxes"][pos]
                     license_plate = data["license_plate"][pos]
@@ -324,8 +425,19 @@ def show_frames():
                     x2 = int(boxes[2])
                     y2 = int(boxes[3])
 
+                    if len(online_targets) > pos:
+                        plate_id = online_targets[pos].track_id
+                        if license_plate != "unknown":
+                            data_struct.add(plate_id, license_plate)
+                        license_plate = "ID:{} {}".format(plate_id, data_struct.get_most_frequent_license_plate(plate_id))
+                        license_plate_list.append(license_plate)
+
                     cv2.rectangle(frame, (x1, y1), (x2, y2), color=(0, 0, 225), thickness=2)
-                    cv2.putText(frame, license_plate, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 225), 3)
+                    cv2.putText(frame, license_plate, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+
+                cv2.putText(frame, ", ".join(license_plate_list), (0, height - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.5,
+                            (0, 255, 0), 3)
+
             # cv2.imshow("Result", frame)
             window.set_output_image(frame)
             if show_fps > 0:
@@ -352,10 +464,5 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     window = MainWindow()
-
-    thread1 = Thread(target=read_frames, args=())
-    thread2 = Thread(target=batch_and_send_frames, args=())
-    thread3 = Thread(target=show_frames, args=())
-
     window.show()
     app.exec()
