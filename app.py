@@ -1,20 +1,20 @@
-import sys
-
-import numpy as np
-from PyQt6.QtCore import QDir, Qt
-from PyQt6.QtWidgets import QMainWindow, QLabel, QPushButton, QComboBox, QFileDialog, QApplication, QVBoxLayout, \
-    QHBoxLayout, QWidget, QFrame, QSizePolicy, QSplitter
-from PyQt6.QtGui import QPixmap, QImage
 import base64
 import json
+import sys
 import time
-from collections import deque, UserList, UserDict, defaultdict
-from concurrent.futures import as_completed
+from collections import defaultdict, deque
 from threading import Thread
+
 import cv2
+import numpy as np
 import requests
-from requests_futures.sessions import FuturesSession
-from ByteTrack.yolox.tracker.byte_tracker import BYTETracker
+# from ByteTrack.yolox.tracker.byte_tracker import BYTETracker
+from bytetracker import BYTETracker
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame,
+                             QHBoxLayout, QLabel, QMainWindow, QPushButton,
+                             QSizePolicy, QSplitter, QVBoxLayout, QWidget)
 
 global exit_flag
 global batch_size
@@ -54,7 +54,8 @@ class DataStructure:
             plate_id (str): The ID of the license plate.
 
         Returns:
-            str: The most frequent license plate for the given plate ID. If no recent plates exist
+            str: The most frequent license plate for the given plate ID.
+                If no recent plates exist
                  for the given plate ID, returns "unknown".
         """
         if plate_id in self.data:
@@ -92,24 +93,32 @@ class MainWindow(QMainWindow):
         # Tạo label để hiển thị đầu vào và đặt kích thước cố định cho label
         self.label_input = QLabel()
         # self.label_input.setSizePolicy(640, 480)
-        self.label_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.label_input.setFrameShape(QFrame.Shape.Box)  # Đặt kiểu viền cho label đầu vào
-        self.label_input.setFrameShadow(QFrame.Shadow.Sunken)  # Đặt hiệu ứng bóng nổi cho label đầu vào
-        self.label_input.setLineWidth(2)  # Đặt độ rộng của viền cho label đầu vào
+        self.label_input.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Đặt kiểu viền cho label đầu vào
+        self.label_input.setFrameShape(QFrame.Shape.Box)
+        # Đặt hiệu ứng bóng nổi cho label đầu vào
+        self.label_input.setFrameShadow(QFrame.Shadow.Sunken)
+        # Đặt độ rộng của viền cho label đầu vào
+        self.label_input.setLineWidth(2)
         self.label_input.setMidLineWidth(1)
 
         # Tạo label để hiển thị đầu ra và đặt kích thước cố định cho label
         self.label_output = QLabel()
         # self.label_output.setFixedSize(640, 480)
-        self.label_output.setFrameShape(QFrame.Shape.Box)  # Đặt kiểu viền cho label đầu ra
-        self.label_output.setFrameShadow(QFrame.Shadow.Sunken)  # Đặt hiệu ứng bóng nổi cho label đầu ra
-        self.label_output.setLineWidth(2)  # Đặt độ rộng của viền cho label đầu ra
+        # Đặt kiểu viền cho label đầu ra
+        self.label_output.setFrameShape(QFrame.Shape.Box)
+        # Đặt hiệu ứng bóng nổi cho label đầu ra
+        self.label_output.setFrameShadow(QFrame.Shadow.Sunken)
+        # Đặt độ rộng của viền cho label đầu ra
+        self.label_output.setLineWidth(2)
         self.label_output.setMidLineWidth(1)
 
         # Tạo button để chọn loại đầu vào
         self.combo_box_input = QComboBox()
         self.combo_box_input.addItems(["Video", "Camera"])
-        self.combo_box_input.currentIndexChanged.connect(self.on_combo_box_input_changed)
+        self.combo_box_input.currentIndexChanged.connect(
+            self.on_combo_box_input_changed)
 
         # Tạo button để tải ảnh hoặc video
         self.button_load_video = QPushButton("Load video")
@@ -180,7 +189,7 @@ class MainWindow(QMainWindow):
             file_dialog.setNameFilters(["Video (*.mp4 *.avi *.mov)"])
         elif self.combo_box_input.currentText() == "Camera":
             self.cap = cv2.VideoCapture(0)
-            image = self.cap.read()[1]
+            # image = self.cap.read()[1]
         if file_dialog.exec():
             # Đọc ảnh hoặc video từ file
             file_path = file_dialog.selectedFiles()[0]
@@ -217,14 +226,17 @@ class MainWindow(QMainWindow):
 
         # Create a QImage from the cv2 image
         height, width, channel = image.shape
-        q_image = QImage(image.data, width, height, width * channel, QImage.Format.Format_RGB888)
+        q_image = QImage(
+            image.data, width, height, width * channel,
+            QImage.Format.Format_RGB888)
 
         # Create a QPixmap from the QImage
         input_pixmap = QPixmap.fromImage(q_image)
 
         # Hiển thị ảnh lên label đầu vào và tự động co dãn
-        input_pixmap = input_pixmap.scaledToWidth(window.label_input.width(),
-                                                  mode=Qt.TransformationMode.SmoothTransformation)
+        input_pixmap = input_pixmap.scaledToWidth(
+            window.label_input.width(),
+            mode=Qt.TransformationMode.SmoothTransformation)
         self.label_input.setPixmap(input_pixmap)
 
     def set_output_image(self, cv2_image):
@@ -238,8 +250,9 @@ class MainWindow(QMainWindow):
         output_pixmap = QPixmap.fromImage(q_image)
 
         # Hiển thị ảnh lên label đầu vào và tự động co dãn
-        output_pixmap = output_pixmap.scaledToWidth(window.label_input.width(),
-                                                    mode=Qt.TransformationMode.SmoothTransformation)
+        output_pixmap = output_pixmap.scaledToWidth(
+            window.label_input.width(),
+            mode=Qt.TransformationMode.SmoothTransformation)
         self.label_output.setPixmap(output_pixmap)
 
 
@@ -336,7 +349,6 @@ def batch_and_send_frames():
     payload, futures = {}, []
     start_time = time.time()
     fps = 0
-    session = FuturesSession()
 
     while not exit_flag:
         # Batch the frames into a dict payload
@@ -394,8 +406,8 @@ def show_frames():
             dets = []
             license_plate_list = []
             show_fps = (len(queue_response) / queue_threshold) * default_fps
-            show_string = "FPS: {} queue_frame: {}, queue_response: {}".format(show_fps, len(queue_frame),
-                                                                               len(queue_response))
+            show_string = "FPS: {} queue_frame: {}, queue_response: {}".format(
+                show_fps, len(queue_frame), len(queue_response))
 
             # print(show_string)
 
